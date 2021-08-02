@@ -30,7 +30,7 @@ class kNN_LDP:
         self.classes_ = None  # The distinct labels used in classifying instances
         self.label_distributions_ = None  # Categorical distribution for each item
         self.transduction_ = []  # n_d array with labels assigned to each item during transduction
-        self.n_iter = 0  # Should initially just be maxed out with 1
+        self.n_iter = 0 
         self.transduced = False 
         self.kdtree = None
 
