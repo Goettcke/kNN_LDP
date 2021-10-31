@@ -1,8 +1,8 @@
-from math import isclose
 from collections import Counter,defaultdict
 from utils.super_heap import SuperHeap
 from utils.neighborhoods import knn_and_rnn
 from sklearn.metrics import accuracy_score
+from utils.helper_functions import key_with_max_val
 
 class kNN_LDP_Node:
     def __init__(self, label_distribution, knn, index, rnn=None):
@@ -24,7 +24,6 @@ class kNN_LDP:
         self.n_neighbors = n_neighbors
         self.X = None  # self.X and self.y are set in the fit method
         self.y = None
-        self.data_list = []
         self.label_set = None
         self.X_ = None  # input array
         self.classes_ = None  # The distinct labels used in classifying instances
@@ -33,6 +32,7 @@ class kNN_LDP:
         self.n_iter = 0 
         self.transduced = False 
         self.kdtree = None
+        self.max_heap = None  
 
 
     def fit(self, X, y):
@@ -44,49 +44,40 @@ class kNN_LDP:
         self.X = X
         self.y = y
         self.label_set = set(y)
+        self.max_heap = SuperHeap(len(y)) 
         self.classes_ = list(self.label_set)
+        self.label_distributions_ = [{label:1} for label in y]
         self._transduce()
 
     def _transduce(self):
-        max_heap = SuperHeap(len(self.y))  
         knn_list, rnn_list,self.kdtree = knn_and_rnn(self.X, self.n_neighbors)
-        unlabelled_points = []
+        U_indices = [index for index, label in enumerate(self.y) if label == -1]
         
-        for index, label in enumerate(self.y):
+        for index in U_indices: 
             label_distribution = self.calculate_instance_label_probability_distribution(knn_list[index])
             node = kNN_LDP_Node(label_distribution=label_distribution, knn=knn_list[index], rnn=rnn_list[index],index=index)
-            self.data_list.append(node)
+            heap_node = {'key': self.probability_certainty(label_distribution), 'node': node}
+            self.max_heap.insert(heap_node)
 
-            if label == -1:
-                heap_node = {'key': self.probability_certainty(label_distribution), 'node': node}
-                max_heap.insert(heap_node)
-                unlabelled_points.append(index)
 
-        counter = 1
-
-        while max_heap.size > 0:
         
-            x = max_heap.extractMax()  # The label distribution should already be updated by update
-            rnns = x['node'].rnn
-            # Update the rnn's label certainty with this new label information and call max_heapify on these
-            for rnn_index in rnns:
-                self.data_list[rnn_index].label_distribution = self.calculate_instance_label_probability_using_label_distributions(knn_list[rnn_index])  # This won't work here anyway cause we need to calculate it using the label distribution
-                
-                if self.data_list[rnn_index].heap_index != -1 and self.data_list[rnn_index].heap_index != -2:  # If the point is inserted (and still in the heap), we update it.
-                    max_heap.maxHeapify(self.data_list[rnn_index].heap_index)
-            counter += 1 
-        self.n_iter += 1  
+        while self.max_heap.size > 0:
+            x = self.max_heap.extractMax() 
+            if x['key'] > 0: 
+                self.label_distributions_[x['node'].index] = self.calculate_instance_label_probability_distribution(knn_list[x['node'].index])
+                for r_neighbor in x['node'].rnn: 
+                    if self.y[r_neighbor] == -1 and self.max_heap.index_dict[r_neighbor] != -2: # Meaning if the point has not yet been labelled
+                        probability = self.calculate_instance_label_probability_distribution(knn_list[r_neighbor])
+                        new_key = self.probability_certainty(probability)
+                        self.max_heap.increaseKey(self.max_heap.index_dict[r_neighbor],new_key)
         self.set_transduction()
-        self.transduced = True 
+        self.transduced = True
 
-    def calculate_instance_label_probability_distribution(self, indices):
-        labels = [self.y[index] for index in indices]
-        label_frequencies = Counter(labels)
-        label_distribution = {key: value / self.n_neighbors for key, value in label_frequencies.items()}
-        return label_distribution
+    def  calculate_instance_label_probability_distribution(self, nearest_neighbors):
+        label_distribution = {} 
+        for key in self.label_set: 
+            label_distribution[key] = sum([self.label_distributions_[index][key] if key in self.label_distributions_[index] else 0 for index in nearest_neighbors])/len(nearest_neighbors)
 
-    def calculate_instance_label_probability_using_label_distributions(self, nearest_neighbors):
-        label_distribution = {key: sum([self.data_list[index].label_distribution[key] if key in self.data_list[index].label_distribution else 0 for index in nearest_neighbors]) / len(nearest_neighbors) for key in self.label_set}  # Uff probably to complex
         return label_distribution
 
     def probability_certainty(self, label_distribution):
@@ -98,41 +89,20 @@ class kNN_LDP:
     def set_transduction(self):
         for index in range(len(self.y)):
             if self.y[index] == -1:
-                decision_dict = self.data_list[index].label_distribution
-                v = list(decision_dict.values())
-                k = list(decision_dict.keys())
-                maximal_value = k[v.index(max(v))]
-                if maximal_value == -1 :
-                    if isclose(v.index(max(v)),1,abs_tol=10e-9):
-                        self.transduction_.append(-1)  # Abstain from making a decision
-                    else :  # In the case we are far out in the propagation, and it is most probable, that the point is unlabelled
-                        decision_dict
-                        decision_dict.pop(-1)
-                        v = list(decision_dict.values())
-                        k = list(decision_dict.keys())
-                        self.transduction_.append(k[v.index(max(v))])
-                else:
-                    self.transduction_.append(maximal_value)
-                    # return the key with the maximal element. #If it is most likely, that the point is unlabelled, the point will remain unlabelled.
+                decision_dict = self.label_distributions_[index]
+                self.transduction_.append(self._maximum_likelihood_prediction(decision_dict))
             else:
                 self.transduction_.append(self.y[index])
 
     def _maximum_likelihood_prediction(self,decision_dict):
-        v = list(decision_dict.values())
-        k = list(decision_dict.keys())
-        
-        maximal_value = k[v.index(max(v))]
-        if maximal_value == -1 :
-            if isclose(v.index(max(v)),1,abs_tol=10e-9):
-                return -1 
-            else :  # In the case we are far out in the propagation, and it is most probable, that the point is unlabelled
-                decision_dict
-                decision_dict.pop(-1)
-                v = list(decision_dict.values())
-                k = list(decision_dict.keys())
-                return k[v.index(max(v))]
-        else:
-            return maximal_value
+        l = {k:v for k,v in decision_dict.items() if k != -1}
+        if l == {}: 
+            return -1  # Abstain from making a decision
+        label = key_with_max_val(l)                 
+        if label != -1 and l[label] > 0.0: 
+            return label
+        else :  
+            return -1
         
 
     def get_params(self):
@@ -140,16 +110,16 @@ class kNN_LDP:
 
     
     def predict(self,X):
-        assert self.transduced == True, "No basis for prediction, fit data to model"
+        assert self.transduced, "No basis for prediction, fit data to model"
         decision_dicts = self.predict_proba(X)
         predictions = [self._maximum_likelihood_prediction(decision_dict) for decision_dict in decision_dicts]
         return predictions
 
 
     def predict_proba(self,X):
-        assert self.transduced == True, "No basis for prediction, fit data to model"
+        assert self.transduced, "No basis for prediction, fit data to model"
         neighbors_list = [self.kdtree.query(query_point,self.n_neighbors + 1)[1] for query_point in X]
-        probabilities = [self.calculate_instance_label_probability_using_label_distributions(neighbors) for neighbors in neighbors_list]
+        probabilities = [self.calculate_instance_label_probability_distribution(neighbors) for neighbors in neighbors_list]
         return probabilities
 
         
@@ -186,4 +156,4 @@ class kNN_LDP:
 
         return self
 
-   
+ 
