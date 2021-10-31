@@ -20,3 +20,23 @@ The implementation follows the Scikit-learn classifier style which most users ar
 See the example.py file on how to use the implementation in further detail. 
 
 ## Citation
+```{r, eval=True}
+@inproceedings{DBLP:conf/sisap/GottckeZC21,
+  author    = {Jonatan M{\o}ller Nuutinen G{\o}ttcke and
+               Arthur Zimek and
+               Ricardo J. G. B. Campello},
+  title     = {Non-parametric Semi-supervised Learning by Bayesian Label Distribution
+               Propagation},
+  booktitle = {{SISAP}},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {13058},
+  pages     = {118--132},
+  publisher = {Springer},
+  year      = {2021}
+}
+```
+### DOI 
+
+```{r, eval=True}
+DOI: 10.1007/978-3-030-89657-7_10
+```
